@@ -258,29 +258,33 @@ function renderLearn(){
   });
 }
 
-/* Mazzo senza ripetizioni: le parole escono tutte prima di ricominciare, anche tra una partita e l'altra */
-const MEM={};
+/* Nessuna ripetizione finché si può.
+   Ogni categoria ha il suo mazzo: le parole escono tutte prima di ricominciare, anche tra una partita e l'altra.
+   In più ogni parola ricorda quando è uscita l'ultima volta, così quelle appena viste
+   (anche in un'altra categoria o modalità) vengono spostate più avanti. */
+let SEEN={},TICK=0;const MEM={};
+try{const v=JSON.parse(store('seen3')||'null');if(v&&v.s){SEEN=v.s;TICK=v.t||0}}catch(e){}
 function loadIds(k){try{const v=JSON.parse(store(k)||'null');if(Array.isArray(v))return v}catch(e){}return MEM[k]||null}
 function saveIds(k,v){MEM[k]=v;store(k,JSON.stringify(v))}
+function recent(id){return (SEEN[id]||0)>TICK-10}
 function draw(n){
-  const ids=pool().map(d=>d.id),key='deck2_'+cat,lastKey='last2_'+cat;
+  const ids=pool().map(d=>d.id),key='deck3_'+cat;
   let deck=(loadIds(key)||[]).filter(i=>ids.includes(i));
-  const last=loadIds(lastKey)||[],out=[];
-  while(out.length<n){
-    if(!deck.length){
-      deck=shuffle(ids.filter(i=>!out.includes(i)));
-      // le parole appena viste vanno in fondo al nuovo giro
-      deck.sort((x,y)=>(last.includes(x)||out.includes(x))-(last.includes(y)||out.includes(y)));
-      if(!deck.length)break;
-      // la prima parola del nuovo giro non è mai l'ultima appena vista
-      const prev=out.length?out[out.length-1]:last[last.length-1];
-      if(deck.length>1&&deck[0]===prev){deck.push(deck.shift())}
-    }
-    const id=deck.shift();if(!out.includes(id))out.push(id);
+  deck=deck.slice().sort((x,y)=>recent(x)-recent(y));
+  const out=shuffle(deck.splice(0,n));
+  if(out.length<n){
+    // nuovo giro: prima le parole viste da più tempo, mescolate a gruppi
+    const fresh=shuffle(ids.filter(i=>!out.includes(i))).sort((x,y)=>(SEEN[x]||0)-(SEEN[y]||0));
+    deck=[];for(let i=0;i<fresh.length;i+=n)deck.push(...shuffle(fresh.slice(i,i+n)));
+    out.push(...shuffle(deck.splice(0,n-out.length)));
   }
-  saveIds(key,deck);saveIds(lastKey,out);
+  // la prima domanda non è mai la parola uscita per ultima
+  let lastId=null,mx=0;for(const k in SEEN)if(SEEN[k]>mx){mx=SEEN[k];lastId=+k}
+  if(out.length>1&&out[0]===lastId)out.push(out.shift());
+  saveIds(key,deck);
   return out.map(i=>D[i]);
 }
+function markSeen(d){SEEN[d.id]=++TICK;store('seen3',JSON.stringify({s:SEEN,t:TICK}))}
 const TYPES=['pic2word','sound2pic','word2pic','it2fr'];
 let lastType=null;
 function startQuiz(){
@@ -301,7 +305,7 @@ function options(a){
 }
 function nextQ(){
   if(Q.n>=Q.qs.length)return endQuiz();
-  const a=Q.qs[Q.n],t=Q.types[Q.n],opts=options(a);Q.cur={a,opts,t};Q.locked=false;
+  const a=Q.qs[Q.n],t=Q.types[Q.n],opts=options(a);markSeen(a);Q.cur={a,opts,t};Q.locked=false;
   const top=`<div class="qtop"><span>Domanda ${Q.n+1} di ${Q.qs.length}</span><span>Giuste: ${Q.ok}</span></div><div class="bar"><i style="width:${Q.n/Q.qs.length*100}%"></i></div>`;
   const wordBtns=opts.map((o,k)=>`<button class="opt" data-k="${k}" lang="fr">${o.f}</button>`).join('');
   const picBtns=opts.map((o,k)=>`<button class="opt pic-opt" data-k="${k}" aria-label="Immagine ${k+1}">${art(o)}</button>`).join('');
